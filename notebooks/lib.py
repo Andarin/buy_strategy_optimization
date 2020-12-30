@@ -21,6 +21,7 @@ program; if not, see <http://www.gnu.org/licenses/>.
 import random
 import time
 import warnings
+import multiprocessing
 
 # Values given
 N = 1000
@@ -30,8 +31,9 @@ V_W = 50
 V_L = 0
 
 # Values searched
-prior_triangle = [max(N*0.15-x,0) for x in range(N)]
-W_DISTRIBUTION = {x: prior_triangle[x]/sum(prior_triangle) for x in range(N)}
+prior_triangle = [(N*0.15-x) if x < N*0.15 else 0 for x in range(N)]
+prior_parabel = [(N*0.15-x)**2  if x < N*0.15 else 0 for x in range(N)]
+W_DISTRIBUTION = {x: prior_parabel[x]/sum(prior_parabel) for x in range(N)}
 
 # Technical params
 PROBA_THRESHOLD = 0.00002
@@ -40,7 +42,7 @@ PRINT_PROGRESS_EVERY_X_SEC = 10
 BREAK_EXACT_METHOD_AFTER_X_SEC = 15
 METASTATS_PRECISION = 4
 NUMBER_RANDOM_DRAW_EXACT_METHOD = 5
-random.seed(271)
+#random.seed(271)
 
 # Framework definitions to run comparison of strategies
 def calc_stats(obs):
@@ -164,9 +166,9 @@ class Progress():
             remaining_est_time = (self.current_time-self.start_time)/iw*(self.w_n-iw)
             print("Est. time remaining: " + str(round(remaining_est_time)) + "s")
 
-            
+
 def eval_f_over_prior(f, w_distribution, method="exact"):
-    payouts = {}
+    global worker # Hack to use multiprocessing, as f must be defined on top-level
     progress = Progress(w_distribution, PRINT_PROGRESS_EVERY_X_SEC)
     
     if method == "exact":
@@ -174,11 +176,15 @@ def eval_f_over_prior(f, w_distribution, method="exact"):
     else:
         def eval_f(f, w): return eval_mc(f, w)
     
-    for iw, w in enumerate(w_distribution):
-        progress.print(iw)
-        payouts[w] = {"obs": eval_f(f, w)}
-        payouts[w]["stats"] = calc_stats(payouts[w]["obs"])
+    def worker(w):
+        payout = {"obs": eval_f(f, w)}
+        payout["stats"] = calc_stats(payout["obs"])
+        return payout
+    
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()-1) as pool:
+        payout_list = pool.map(worker, w_distribution.keys(), chunksize=10)
 
+    payouts = {w: payout_list[iw] for iw, w in enumerate(w_distribution.keys())}
     payouts["stats"] = calc_metastats(payouts, w_distribution)
     return payouts
 
